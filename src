@@ -1,0 +1,381 @@
+# This program is an implementation of the dijsktra graph alogorithm in mips assembly
+
+.data	
+min:		.word 0 
+min_index:	.word 0
+verticies:		.word 3 
+u:		.word 0 
+src:		.word 0
+graph_output:	.asciiz "Path\tShortest Distance\tPath\n" 
+arrowSTR:	.asciiz " -> " 
+tabsSTR:	.ascii "\t\t" 
+newline:	.asciiz "\n" 
+dist:		.word 0:50 # 50 element array
+spTree:		.word 0:50 # 50 element bool array 
+parent:		.word 0:50 # 50 element array
+graph:		.word 0,1,2,1,0,2,2,2,1
+
+
+.text
+
+main:
+
+	# call dijkstra(graph, 0);
+	jal dijkstra
+	
+	#return 0;
+	li $v0,10
+	syscall
+
+######################################################################################################
+dijkstra:
+
+	#save the original return address in $ra on a stack
+	addi $sp, $sp, -4  # adjust stack to make room for 1 item
+	sw  $ra, 0($sp)    # save register $ra so that the jump return instruction conatins the right value to return control to line 29 in main
+	
+	# delcaring the arrays(loading their addresses into registers) and the number of vericies in the graph
+	# will keep these values constant throughout the program, won't use these registers again until the print procedures when the min psanning tree has been copmuted
+	la $s0, dist # int dist[verticies]; (dist[0])= &dist = $s0 = address of first dist element
+	la $s1, spTree # bool spTree[verticies];
+	la $s2, parent # int parent[verticies];
+	la $s3, graph # int graph[verticies][verticies] =....
+	lw $s4, verticies # verticies = 9 = $s4 , #define verticies 9
+
+# an initialization for loop that sets all distances from the source as INFINITE and spTree[] as false
+	li $t0, 0 # int i= $t0 = 0
+for_initialize: # initialize_loop:
+
+        # parent[0] = -1;
+	li $t1, -1
+	sw $t1, ($s2) # store word in register $t1 into RAM at address contained in $s2
+
+	# dist[i] = INT_MAX;
+	li $t2, 100000 # $t2 = INT_MAX;
+	
+	# need to make another copy of i that incrmenets by 4, not 1, to correctly access the words in the array
+	move $t3,$t0 # $t3 = i
+	sll $t3,$t3,2 # i*4
+	addu $t4,$t3,$s0 # $t4 = dist address pointer
+	sw $t2, 0($t4) # dist[i = $s0+i*4] = INT_MAX
+	
+	# spTree[i] = false = 0; 
+	addu $t5,$t3,$s1 # $t5 = spTree address pointer i*4+$s1
+	sw $zero, 0($t5) # spTree[i] = false
+
+	addiu $t0, $t0, 1 # i++
+
+	blt $t0,$s4,for_initialize # if i < verticies branch to top of loop, else falls through loop and to the next instruction
+	
+	# dist[src] = 0
+	# the distance of source vertex to itself is always 0
+	lw $t6, src # $t6 = src = 0
+	sll $t6,$t6,2 # src*4	if source if 2 then $t6 needs to be 8....
+	addu $t6,$t6,$s0 # now $t6 = address of dist[src]
+	sw $zero ,0($t6) # dist[src] = 0
+
+# loop that copmutes the shortest path tree
+	li $t0, 0 # int count= $t0 = 0
+for_count: # outer for: for (int count = 0; count < V-1; count++)
+
+	#int u = minDistance(dist, spTree);
+	jal minDistance
+	# $t7 = u = minDistance(dist, spTree);
+	move $t7, $v0
+	
+	#spTree[u] = true;
+	move $t3, $t7 # make copy of u to increment by 4 for word address purposes
+	sll $t3, $t3, 2 # $t3 = u*4
+	addu $t5,$t3,$s1 #$t5 = $(spTree[u]),  $t5 = $(spTree[u]) = u*4 + $s1 =address of spTree[u]
+	li $t8,1 # need 1 = true in a register
+	sw $t8, 0($t5) #spTree[u] = true = 1;
+
+# the inner for loop updates the distance value of the verticies adjacent to the index v/the chosen vertex
+	li $t1, 0 # int v = $t1 = 0
+for_v: # inner_for:  for (int v = 0; v < V; v++)
+
+	#need another copy of index v that increments by 4 instead of by 1, 
+	sll $t4,$t1,2 # $t4 = $v*4
+	
+	#if (!spTree[v] && graph[u][v] && dist[u] + graph[u][v] < dist[v])
+	#the strategy is to get the truth values of the operands into registers, then perform set instructions with branches/skip over if any operand values are false
+	
+	#!spTree[v]
+	#get spTree[v] into a register
+	addu $t6,$t4,$s1 # $t6 = the address of spTree[v].  
+	lw $t9, 0($t6) # $t9 =  spTree[v]
+	not $t9, $t9 # $t9 contains the value of spTree[v] but with all of it's bits flipped.
+	# the elents of spTree are either 0 or 1 so when flip the bits, the first bit will always be the opposite of it's initial value
+	# andi will force the three initial bits to be 0 and the result will be either 0 or 1
+	andi $s5,$t9,1 # $s5 = $!spTree[v]_bool
+	
+	#graph[u][v]
+	# the address of elements in graph[u][v] is at $s3 +4*(u*verticies+v)
+
+	#get the graphuv address into a register 	
+	# multiply u*verticies, u is an int from 0-8
+	multu $t7, $s4 # u*verticies
+	mflo $t8 # $t8 = u*verticies
+	# add to v
+	addu $t8, $t1, $t8 # $w = u*verticies+v
+	# multiply by 4
+	sll $t8, $t8, 2 # $t8 = 4*(u*verticies+v)
+	# add to address 
+	addu $t8 ,$s3 ,$t8 # $t8 = $s3 +4*(u*verticies+v) = graph[u][v]
+	
+	lw $s6, 0($t8) # $s6 = $graph[u][v]_bool
+		
+	#dist[u] + graph[u][v]
+	
+	# get dist[v] into a register
+	addu $t6,$s0,$t4 # $t6 = $(dist[v]) address of dist[v]
+	lw $t9, 0($t6) # $t9 = value of array element at address $(dist[v])
+	# get dist[u] into a register
+	addu $t5,$s0,$t3 # $t5 = (dist[u])
+	lw $t8, 0($t5) # $t8 = value of array element at address (dist[u])
+	
+	# then get sum $t5 = dist[u] + graph[u][v] into a register 
+	addu $t5, $t8, $s6
+	
+	#dist[u] + graph[u][v] < dist[v]
+	# then perform slt to get bool result into a reg
+	slt $s7, $t5,$t9 # $s7 = $<_bool
+	
+	#if (!spTree[v] && graph[u][v] && dist[u] + graph[u][v] < dist[v])
+	#then can perform the final condition computation with serial branches
+	beq $s5, $zero, skip2	#branch if !spTree[v] == 0, to top of inner for loop/skip2
+	beq $s6, $zero, skip2	#branch if graph[u][v] == 0, to top of inner for loop/skip2
+	beq $s7, $zero, skip2	#branch if dist[u] + graph[u][v] < dist[v] == 0, to top of inner for loop/skip2
+	
+	# parent[v]  = u; 	
+	# u is already in a register, need to get adrres of parentv in a register then store the value of u in it
+	# $s2 = (parent[0]) ~ the address, not the value at parent[0]
+	# need get address of parent[v] in a register
+	addu $t6,$s2,$t4
+	#then store u in address of parent[v]
+	sw $t7, 0($t6) # parent[v]  = u;
+	
+	#dist[v] = dist[u] + graph[u][v];	
+	addu $t6,$s0,$t4 # $t6 = $(dist[v]) address of dist[v]
+	sw $t5, 0($t6) # dist[v] = dist[u] + graph[u][v]
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++
+skip2:	
+	# v++
+	addiu $t1, $t1, 1
+	
+	#branch if v < verticies to the top of the inner loop
+	blt $t1,$s4,for_v
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ end inner for
+	#count++
+	addiu $t0, $t0, 1
+	
+        #branch if count < verticies-1 to the top of the outer loop
+        li $s5,1
+        sub $s6,$s4,$s5 # $s6 = verticies-1
+        blt $t0,$s6,for_count
+        
+#++++++++++++++++++++++++++++++++++++++++++ end outer for
+
+	# this changes the value of the $ra register from it's original value in printSolution to the addreess of line 188
+	jal printSolution
+	
+	# pop original ra value from main off of stack here since $ra contains the wrong address(the address of line 188)
+	lw $ra, 0($sp)  # restore register $ra from main
+	addi $sp, $sp, 4 # adjust stack to delete 1 item
+	
+	# $ra now points to/conatins the address of li $v0,10 in main
+	jr	$ra
+
+######################################################################################################
+minDistance:
+
+	# initialize min and min_index
+	li $s5, 100000 # $s5 = min = INT_MAX
+	move $s6,$zero # $s6 = int min = min_index = 0
+	
+# for (int v = 0; v < V; v++)
+	li $t1, 0 # int v = 0
+for:
+	
+	# create second index register
+	move $t3,$t1	# t3 = v/index
+	sll $t3, $t3, 2 # $t3 = v*4
+	# add beginning address to index address
+	# $t4 = address of dist[v]
+	addu $t4, $t3, $s0
+
+	# need to get value at dist[v] into a register...
+	lw $t5, 0($t4) # $t5 = dist[v]
+	# dist[v] <= min
+	sle $t6,$t5,$s5 #Set Less or Equal : if $t5 less or equal to $t0 then set $t6 to 1 else 0
+
+	#now need get spTree[v] into a register...
+	#$s1 is address of first eleemnt, t3 is index v
+	addu $t7, $t3, $s1 # $t7 contains address of element at v
+	lw $t8, 0($t7) # $t8 = spTree[v]
+	
+	#then use set if equal to get bool value in register ~ spTree[v] == false
+	seq $t9,$t8,$zero #Set EQual : if $t8 equal to $zero then set $t9 to 1 else 0
+	
+	#then must test both bool values/truth values, branch if either $t9 or $t6 is equal to 0
+	beq $t9,$zero,skip
+	beq $t6,$zero,skip
+	
+	# else update min and min_index
+	move $s5, $t5 # min = dist[v]
+	move $s6, $t1 # min_index = v
+	
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++
+skip:
+	addiu $t1, $t1, 1 # v++
+	
+	blt $t1,$s4, for # if v < verticies then loop again
+
+	#return min_index;
+	move $v0, $s6
+
+	jr	$ra
+
+######################################################################################################
+# print the path, and distance of the shortest path tree
+# in print solution, all registers are available to me again
+printSolution:
+	
+	#push $ra= (address of line 188) onto stack bc am going to call another procedure from here which will change the $ra value
+	addi $sp, $sp, -4 # adjust stack pointer to make room for anoer word
+	sw $ra, 0($sp) # store the value of the address of line 188 on the stack
+	
+	#int src = 0 = $t0;
+	lw $t0, src
+	
+	# printf("verticiesertex\t  Distance\n");
+	la $a0, graph_output
+	li $v0, 4 
+	syscall
+
+# for (int i = 1; i < verticies; i++)
+	li $t1, 1 #int i = 1
+for2:
+
+	# cout << src << " -> " << i << "\t\t" << dist[i] << endl;
+	li	$v0, 1	# print src
+	move	$a0, $t0
+	syscall
+	
+	la $a0, arrowSTR # print ->
+	li $v0, 4 
+	syscall
+	
+	# print i
+	li	$v0, 1
+	move	$a0, $t1
+	syscall	
+	
+	# tabs
+	addi $a0, $0, 0x9 # 0x9 is the hex value for the tab character
+        li $v0, 11 #syscall 11 prints the lower 8 bits of $a0 as an ascii character.
+        syscall
+        syscall
+
+	# make a copy of i to increment by four
+	move $t3,$t1
+	# sll twice to multiply i by 4 i*4
+	sll $t3, $t3, 2
+	# add beginning address to index address
+	addu $t4, $t3, $s0
+	lw $t2,0($t4)
+	
+	# print dist[i], 
+	li	$v0, 1
+	move	$a0, $t2 #print value at array pointer/address
+	syscall	
+	
+	# tabs
+	addi $a0, $0, 0x9
+        li $v0, 11
+        syscall
+        syscall
+
+	# call printPath(parent, i);
+	# clear $t3 which will be the counter for the number of verticies that are in the shortest path from the source to vertex i/j
+	move $t3, $zero
+	move $s1, $t1 # $s1 = j = copy of i passed into j as an argument
+	jal printPath
+	# now $ra points below to the address of line 312
+
+	# print newline
+	li $a0, 0xA # 0xA is the hex for the newline character
+        li $v0, 11 #syscall 11 prints the lower 8 bits of $a0 as an ascii character.
+        syscall
+
+	addiu $t1, $t1, 1 #i++
+
+	#branch on less that i= $t1 < verticies to top of loop/for lable
+	blt $t1,$s4, for2
+
+	#pop original return address to dijk off of stack
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	
+	jr	$ra #now ra contains line 188 address
+
+######################################################################################################
+# printPath uses recursive calls to itself to print the shortest path from the source vertex to vertex j
+printPath:
+
+        li $t5, -1
+        move $t8, $s1
+        sll $t8, $t8, 2 # $t8 = j*4 = i*4
+        
+        # load parent[j] into a register
+        addu $t6,$t8,$s2  # $t6 = address of parent[j]
+        lw $t7, 0($t6) # $t7 = parent[j]
+        
+        # if (parent[j]== -1) return;
+        beq $t7,$t5,label2
+        # else
+        j label1
+
+
+label1:
+	# push parent[j] onto the stack, if value isn't -1
+	addi $sp, $sp, -4
+	sw $t7, 0($sp)# sw $j, 0($sp)
+	
+	# incrmemnt a counter to count the number of verticies in the shortest path to print
+	addi $t3, $t3, 1
+	
+	# recursively call printPath(parent, parent[j]); with parent[j] passed into j
+	move $s1,$t7 
+	j	printPath
+
+label2:
+	# pop j's off of the stack and print them, one at a time, fifo
+	lw $t9, 0($sp)# lw $j, 0($sp)
+	addi $sp, $sp, 4
+	
+	# print outstack parent[j]'s
+	# need 2 copies of j bc need print the original +1 index not the *4 index
+	move $a0,$t9 # move $a0,$j
+	li $v0, 1
+	syscall
+
+	# decrement the loop counter after each print
+	addi $t3, $t3, -1
+	
+	# if loop counter == $zero, i.e. there are no more verticies in the path to print,
+	# then jump to exit
+	beq $t3, $zero, exit
+	#else, print another vertex(until entire shortest path is printed, except for the end vertex)
+	j label2
+
+exit:
+	# print j
+	move $a0, $t1
+	li $v0, 1
+	syscall
+	
+	# jumpi to line 312 in print solution
+	jr $ra
